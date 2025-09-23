@@ -24,18 +24,20 @@ if ($_POST) {
             
             if ($estudiante_id > 0 && !empty($fecha)) {
                 // Verificar si ya existe una asistencia para este estudiante en esta fecha
-                $query = "SELECT id FROM asistencias WHERE estudiante_id = ? AND fecha = ?";
+                $query = "SELECT a.id_asistencia FROM asistencias a 
+                         JOIN inscripciones i ON a.id_inscripcion = i.id_inscripcion
+                         WHERE i.id_estudiante = ? AND a.fecha = ?";
                 $stmt = $db->prepare($query);
                 $stmt->execute([$estudiante_id, $fecha]);
                 
                 if ($stmt->rowCount() > 0) {
                     // Actualizar asistencia existente
+                    $asistencia_existente = $stmt->fetch();
                     $query = "UPDATE asistencias SET 
-                             hora_llegada = ?, hora_salida = ?, estado = ?, observaciones = ?,
-                             fecha_actualizacion = CURRENT_TIMESTAMP
-                             WHERE estudiante_id = ? AND fecha = ?";
+                             estado = ?, modificado_en = CURRENT_TIMESTAMP
+                             WHERE id_asistencia = ?";
                     $stmt = $db->prepare($query);
-                    if ($stmt->execute([$hora_llegada, $hora_salida, $estado, $observaciones, $estudiante_id, $fecha])) {
+                    if ($stmt->execute([$estado, $asistencia_existente['id_asistencia']])) {
                         $mensaje = 'Asistencia actualizada exitosamente';
                         $tipoMensaje = 'success';
                     } else {
@@ -43,16 +45,27 @@ if ($_POST) {
                         $tipoMensaje = 'danger';
                     }
                 } else {
-                    // Crear nueva asistencia
-                    $query = "INSERT INTO asistencias (estudiante_id, docente_id, fecha, hora_llegada, hora_salida, estado, observaciones) 
-                             VALUES (?, ?, ?, ?, ?, ?, ?)";
+                    // Obtener inscripción del estudiante
+                    $query = "SELECT id_inscripcion FROM inscripciones WHERE id_estudiante = ? LIMIT 1";
                     $stmt = $db->prepare($query);
-                    if ($stmt->execute([$estudiante_id, $_SESSION['user_id'], $fecha, $hora_llegada, $hora_salida, $estado, $observaciones])) {
-                        $mensaje = 'Asistencia registrada exitosamente';
-                        $tipoMensaje = 'success';
+                    $stmt->execute([$estudiante_id]);
+                    $inscripcion = $stmt->fetch();
+                    
+                    if ($inscripcion) {
+                        // Crear nueva asistencia
+                        $query = "INSERT INTO asistencias (id_inscripcion, id_curso_materia, fecha, estado, creado_por) 
+                                 VALUES (?, 1, ?, ?, ?)";
+                        $stmt = $db->prepare($query);
+                        if ($stmt->execute([$inscripcion['id_inscripcion'], $fecha, $estado, $_SESSION['user_id']])) {
+                            $mensaje = 'Asistencia registrada exitosamente';
+                            $tipoMensaje = 'success';
+                        } else {
+                            $mensaje = 'Error al registrar la asistencia';
+                            $tipoMensaje = 'danger';
+                        }
                     } else {
-                        $mensaje = 'Error al registrar la asistencia';
-                        $tipoMensaje = 'danger';
+                        $mensaje = 'No se encontró inscripción para el estudiante';
+                        $tipoMensaje = 'warning';
                     }
                 }
             } else {
@@ -65,7 +78,7 @@ if ($_POST) {
             $id = intval($_POST['id'] ?? 0);
             
             if ($id > 0) {
-                $query = "DELETE FROM asistencias WHERE id = ?";
+                $query = "DELETE FROM asistencias WHERE id_asistencia = ?";
                 $stmt = $db->prepare($query);
                 if ($stmt->execute([$id])) {
                     $mensaje = 'Asistencia eliminada exitosamente';
@@ -83,18 +96,23 @@ if ($_POST) {
 }
 
 // Obtener lista de estudiantes
-$query = "SELECT * FROM estudiantes WHERE activo = 1 ORDER BY apellidos, nombres";
+$query = "SELECT e.*, u.nombre, u.apellido 
+          FROM estudiantes e 
+          JOIN usuarios u ON e.id_usuario = u.id_usuario 
+          ORDER BY u.apellido, u.nombre";
 $stmt = $db->prepare($query);
 $stmt->execute();
 $estudiantes = $stmt->fetchAll();
 
 // Obtener asistencias del día actual por defecto
 $fecha_consulta = $_GET['fecha'] ?? date('Y-m-d');
-$query = "SELECT a.*, e.nombres, e.apellidos 
+$query = "SELECT a.*, u.nombre, u.apellido 
           FROM asistencias a 
-          JOIN estudiantes e ON a.estudiante_id = e.id 
+          JOIN inscripciones i ON a.id_inscripcion = i.id_inscripcion
+          JOIN estudiantes e ON i.id_estudiante = e.id_estudiante
+          JOIN usuarios u ON e.id_usuario = u.id_usuario
           WHERE a.fecha = ? 
-          ORDER BY e.apellidos, e.nombres";
+          ORDER BY u.apellido, u.nombre";
 $stmt = $db->prepare($query);
 $stmt->execute([$fecha_consulta]);
 $asistencias = $stmt->fetchAll();
@@ -333,22 +351,22 @@ $estadisticas = $stmt->fetch();
                             <?php else: ?>
                             <?php foreach ($asistencias as $asistencia): ?>
                             <tr>
-                                <td><?php echo htmlspecialchars($asistencia['nombres'] . ' ' . $asistencia['apellidos']); ?></td>
-                                <td><?php echo $asistencia['hora_llegada'] ? date('H:i', strtotime($asistencia['hora_llegada'])) : '-'; ?></td>
-                                <td><?php echo $asistencia['hora_salida'] ? date('H:i', strtotime($asistencia['hora_salida'])) : '-'; ?></td>
+                                <td><?php echo htmlspecialchars($asistencia['nombre'] . ' ' . $asistencia['apellido']); ?></td>
+                                <td>-</td>
+                                <td>-</td>
                                 <td>
                                     <span class="badge badge-<?php echo $asistencia['estado']; ?>">
                                         <?php echo ucfirst($asistencia['estado']); ?>
                                     </span>
                                 </td>
-                                <td><?php echo htmlspecialchars($asistencia['observaciones']); ?></td>
+                                <td>-</td>
                                 <td>
                                     <button type="button" class="btn btn-sm btn-primary btn-action me-1" 
                                             onclick="editarAsistencia(<?php echo htmlspecialchars(json_encode($asistencia)); ?>)">
                                         <i class="fas fa-edit"></i>
                                     </button>
                                     <button type="button" class="btn btn-sm btn-danger btn-action" 
-                                            onclick="eliminarAsistencia(<?php echo $asistencia['id']; ?>, '<?php echo htmlspecialchars($asistencia['nombres'] . ' ' . $asistencia['apellidos']); ?>')">
+                                            onclick="eliminarAsistencia(<?php echo $asistencia['id_asistencia']; ?>, '<?php echo htmlspecialchars($asistencia['nombre'] . ' ' . $asistencia['apellido']); ?>')">
                                         <i class="fas fa-trash"></i>
                                     </button>
                                 </td>
@@ -380,8 +398,8 @@ $estadisticas = $stmt->fetch();
                             <select class="form-control" id="estudiante_id" name="estudiante_id" required>
                                 <option value="">Seleccione un estudiante</option>
                                 <?php foreach ($estudiantes as $estudiante): ?>
-                                <option value="<?php echo $estudiante['id']; ?>">
-                                    <?php echo htmlspecialchars($estudiante['nombres'] . ' ' . $estudiante['apellidos']); ?>
+                                <option value="<?php echo $estudiante['id_estudiante']; ?>">
+                                    <?php echo htmlspecialchars($estudiante['nombre'] . ' ' . $estudiante['apellido']); ?>
                                 </option>
                                 <?php endforeach; ?>
                             </select>

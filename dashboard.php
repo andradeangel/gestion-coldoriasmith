@@ -11,7 +11,7 @@ $tipoUsuario = $_SESSION['tipo_usuario'];
 
 // Mensaje de bienvenida según el tipo de usuario
 $mensajesBienvenida = [
-    'administrador' => [
+    'admin' => [
         'titulo' => 'Panel de Administración',
         'mensaje' => 'Bienvenido al sistema de gestión del Colegio Dora Schmidt - A. Como administrador, tiene acceso completo a todas las funcionalidades del sistema.',
         'icono' => 'fas fa-user-shield',
@@ -320,7 +320,7 @@ $infoUsuario = $mensajesBienvenida[$tipoUsuario];
                     <div class="card-body">
                         <div class="row">
                             <div class="col-md-6">
-                                <p><strong>Usuario:</strong> <?php echo htmlspecialchars($_SESSION['username']); ?></p>
+                                <p><strong>Email:</strong> <?php echo htmlspecialchars($_SESSION['email']); ?></p>
                                 <p><strong>Nombre Completo:</strong> <?php echo htmlspecialchars($nombreCompleto); ?></p>
                             </div>
                             <div class="col-md-6">

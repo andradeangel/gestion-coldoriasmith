@@ -17,31 +17,31 @@ if (isLoggedIn()) {
 $error = '';
 
 if ($_POST) {
-    $username = trim($_POST['username'] ?? '');
+    $email = trim($_POST['email'] ?? '');
     $password = trim($_POST['password'] ?? '');
     $role     = trim($_POST['role'] ?? '');
     
-    if (!empty($username) && !empty($password) && !empty($role)) {
+    if (!empty($email) && !empty($password) && !empty($role)) {
         $database = new Database();
         $db = $database->getConnection();
         
         if ($db) {
-            $query = "SELECT id, username, password, tipo_usuario, nombres, apellidos 
+            $query = "SELECT id_usuario, nombre, apellido, password, rol 
                       FROM usuarios 
-                      WHERE username = ? AND tipo_usuario = ? AND activo = 1";
+                      WHERE email = ? AND rol = ?";
             $stmt = $db->prepare($query);
-            $stmt->execute([$username, $role]);
+            $stmt->execute([$email, $role]);
             
             if ($stmt->rowCount() > 0) {
                 $user = $stmt->fetch();
                 
                 // Verificar contraseña
                 if (password_verify($password, $user['password']) || $password === 'password') {
-                    $_SESSION['user_id'] = $user['id'];
-                    $_SESSION['username'] = $user['username'];
-                    $_SESSION['tipo_usuario'] = $user['tipo_usuario'];
-                    $_SESSION['nombres'] = $user['nombres'];
-                    $_SESSION['apellidos'] = $user['apellidos'];
+                    $_SESSION['user_id'] = $user['id_usuario'];
+                    $_SESSION['email'] = $user['email'];
+                    $_SESSION['tipo_usuario'] = $user['rol'];
+                    $_SESSION['nombres'] = $user['nombre'];
+                    $_SESSION['apellidos'] = $user['apellido'];
                     
                     // 🚀 Evita reenvío de formulario (PRG)
                     header('Location: dashboard.php');
@@ -139,11 +139,11 @@ if ($_POST) {
                         
                         <form method="POST" action="">
                             <div class="mb-3">
-                                <label for="username" class="form-label">
-                                    <i class="fas fa-user me-2"></i>Usuario
+                                <label for="email" class="form-label">
+                                    <i class="fas fa-envelope me-2"></i>Email
                                 </label>
-                                <input type="text" class="form-control" id="username" name="username" 
-                                       value="<?php echo htmlspecialchars($_POST['username'] ?? ''); ?>" required>
+                                <input type="email" class="form-control" id="email" name="email" 
+                                       value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>" required>
                             </div>
                             
                             <div class="mb-3">

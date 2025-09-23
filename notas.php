@@ -17,20 +17,37 @@ if ($_POST) {
         case 'crear':
             $nombres = trim($_POST['nombres'] ?? '');
             $apellidos = trim($_POST['apellidos'] ?? '');
-            $nota = floatval($_POST['nota'] ?? 0);
+            $email = trim($_POST['email'] ?? '');
+            $codigo = trim($_POST['codigo'] ?? '');
+            $fecha_nacimiento = $_POST['fecha_nacimiento'] ?? '';
+            $genero = $_POST['genero'] ?? '';
             
-            if (!empty($nombres) && !empty($apellidos) && $nota >= 0 && $nota <= 100) {
-                $query = "INSERT INTO estudiantes (nombres, apellidos, nota) VALUES (?, ?, ?)";
-                $stmt = $db->prepare($query);
-                if ($stmt->execute([$nombres, $apellidos, $nota])) {
+            if (!empty($nombres) && !empty($apellidos) && !empty($email) && !empty($codigo)) {
+                try {
+                    $db->beginTransaction();
+                    
+                    // Crear usuario
+                    $query = "INSERT INTO usuarios (nombre, apellido, email, password, rol) VALUES (?, ?, ?, ?, 'estudiante')";
+                    $stmt = $db->prepare($query);
+                    $password_hash = password_hash('password123', PASSWORD_BCRYPT);
+                    $stmt->execute([$nombres, $apellidos, $email, $password_hash]);
+                    $usuario_id = $db->lastInsertId();
+                    
+                    // Crear estudiante
+                    $query = "INSERT INTO estudiantes (id_usuario, codigo, fecha_nacimiento, genero) VALUES (?, ?, ?, ?)";
+                    $stmt = $db->prepare($query);
+                    $stmt->execute([$usuario_id, $codigo, $fecha_nacimiento, $genero]);
+                    
+                    $db->commit();
                     $mensaje = 'Estudiante agregado exitosamente';
                     $tipoMensaje = 'success';
-                } else {
+                } catch (Exception $e) {
+                    $db->rollBack();
                     $mensaje = 'Error al agregar el estudiante';
                     $tipoMensaje = 'danger';
                 }
             } else {
-                $mensaje = 'Por favor, complete todos los campos correctamente';
+                $mensaje = 'Por favor, complete todos los campos obligatorios';
                 $tipoMensaje = 'warning';
             }
             break;
@@ -39,15 +56,30 @@ if ($_POST) {
             $id = intval($_POST['id'] ?? 0);
             $nombres = trim($_POST['nombres'] ?? '');
             $apellidos = trim($_POST['apellidos'] ?? '');
-            $nota = floatval($_POST['nota'] ?? 0);
+            $email = trim($_POST['email'] ?? '');
+            $codigo = trim($_POST['codigo'] ?? '');
             
-            if ($id > 0 && !empty($nombres) && !empty($apellidos) && $nota >= 0 && $nota <= 100) {
-                $query = "UPDATE estudiantes SET nombres = ?, apellidos = ?, nota = ? WHERE id = ?";
-                $stmt = $db->prepare($query);
-                if ($stmt->execute([$nombres, $apellidos, $nota, $id])) {
+            if ($id > 0 && !empty($nombres) && !empty($apellidos) && !empty($email)) {
+                try {
+                    $db->beginTransaction();
+                    
+                    // Actualizar usuario
+                    $query = "UPDATE usuarios u JOIN estudiantes e ON u.id_usuario = e.id_usuario 
+                             SET u.nombre = ?, u.apellido = ?, u.email = ? 
+                             WHERE e.id_estudiante = ?";
+                    $stmt = $db->prepare($query);
+                    $stmt->execute([$nombres, $apellidos, $email, $id]);
+                    
+                    // Actualizar estudiante
+                    $query = "UPDATE estudiantes SET codigo = ? WHERE id_estudiante = ?";
+                    $stmt = $db->prepare($query);
+                    $stmt->execute([$codigo, $id]);
+                    
+                    $db->commit();
                     $mensaje = 'Estudiante actualizado exitosamente';
                     $tipoMensaje = 'success';
-                } else {
+                } catch (Exception $e) {
+                    $db->rollBack();
                     $mensaje = 'Error al actualizar el estudiante';
                     $tipoMensaje = 'danger';
                 }
@@ -61,12 +93,27 @@ if ($_POST) {
             $id = intval($_POST['id'] ?? 0);
             
             if ($id > 0) {
-                $query = "DELETE FROM estudiantes WHERE id = ?";
-                $stmt = $db->prepare($query);
-                if ($stmt->execute([$id])) {
+                try {
+                    $db->beginTransaction();
+                    
+                    // Obtener id_usuario del estudiante
+                    $query = "SELECT id_usuario FROM estudiantes WHERE id_estudiante = ?";
+                    $stmt = $db->prepare($query);
+                    $stmt->execute([$id]);
+                    $estudiante = $stmt->fetch();
+                    
+                    if ($estudiante) {
+                        // Eliminar estudiante (esto eliminará el usuario por CASCADE)
+                        $query = "DELETE FROM estudiantes WHERE id_estudiante = ?";
+                        $stmt = $db->prepare($query);
+                        $stmt->execute([$id]);
+                    }
+                    
+                    $db->commit();
                     $mensaje = 'Estudiante eliminado exitosamente';
                     $tipoMensaje = 'success';
-                } else {
+                } catch (Exception $e) {
+                    $db->rollBack();
                     $mensaje = 'Error al eliminar el estudiante';
                     $tipoMensaje = 'danger';
                 }
@@ -79,7 +126,10 @@ if ($_POST) {
 }
 
 // Obtener lista de estudiantes
-$query = "SELECT * FROM estudiantes WHERE activo = 1 ORDER BY apellidos, nombres";
+$query = "SELECT e.*, u.nombre, u.apellido, u.email 
+          FROM estudiantes e 
+          JOIN usuarios u ON e.id_usuario = u.id_usuario 
+          ORDER BY u.apellido, u.nombre";
 $stmt = $db->prepare($query);
 $stmt->execute();
 $estudiantes = $stmt->fetchAll();
@@ -87,10 +137,13 @@ $estudiantes = $stmt->fetchAll();
 // Obtener estadísticas
 $query = "SELECT 
     COUNT(*) as total_estudiantes,
-    AVG(nota) as promedio_notas,
-    MAX(nota) as nota_maxima,
-    MIN(nota) as nota_minima
-    FROM estudiantes WHERE activo = 1";
+    AVG(c.nota) as promedio_notas,
+    MAX(c.nota) as nota_maxima,
+    MIN(c.nota) as nota_minima
+    FROM estudiantes e 
+    JOIN usuarios u ON e.id_usuario = u.id_usuario
+    LEFT JOIN inscripciones i ON e.id_estudiante = i.id_estudiante
+    LEFT JOIN calificaciones c ON i.id_inscripcion = c.id_inscripcion";
 $stmt = $db->prepare($query);
 $stmt->execute();
 $estadisticas = $stmt->fetch();
@@ -270,8 +323,8 @@ $estadisticas = $stmt->fetch();
                                 <th>ID</th>
                                 <th>Nombres</th>
                                 <th>Apellidos</th>
-                                <th>Nota</th>
-                                <th>Estado</th>
+                                <th>Email</th>
+                                <th>Código</th>
                                 <th>Acciones</th>
                             </tr>
                         </thead>
@@ -286,26 +339,18 @@ $estadisticas = $stmt->fetch();
                             <?php else: ?>
                             <?php foreach ($estudiantes as $estudiante): ?>
                             <tr>
-                                <td><?php echo $estudiante['id']; ?></td>
-                                <td><?php echo htmlspecialchars($estudiante['nombres']); ?></td>
-                                <td><?php echo htmlspecialchars($estudiante['apellidos']); ?></td>
-                                <td>
-                                    <span class="badge bg-<?php echo $estudiante['nota'] >= 80 ? 'success' : ($estudiante['nota'] >= 60 ? 'warning' : 'danger'); ?>">
-                                        <?php echo $estudiante['nota']; ?>
-                                    </span>
-                                </td>
-                                <td>
-                                    <span class="badge bg-<?php echo $estudiante['activo'] ? 'success' : 'secondary'; ?>">
-                                        <?php echo $estudiante['activo'] ? 'Activo' : 'Inactivo'; ?>
-                                    </span>
-                                </td>
+                                <td><?php echo $estudiante['id_estudiante']; ?></td>
+                                <td><?php echo htmlspecialchars($estudiante['nombre']); ?></td>
+                                <td><?php echo htmlspecialchars($estudiante['apellido']); ?></td>
+                                <td><?php echo htmlspecialchars($estudiante['email']); ?></td>
+                                <td><?php echo htmlspecialchars($estudiante['codigo']); ?></td>
                                 <td>
                                     <button type="button" class="btn btn-sm btn-primary btn-action me-1" 
                                             onclick="editarEstudiante(<?php echo htmlspecialchars(json_encode($estudiante)); ?>)">
                                         <i class="fas fa-edit"></i>
                                     </button>
                                     <button type="button" class="btn btn-sm btn-danger btn-action" 
-                                            onclick="eliminarEstudiante(<?php echo $estudiante['id']; ?>, '<?php echo htmlspecialchars($estudiante['nombres'] . ' ' . $estudiante['apellidos']); ?>')">
+                                            onclick="eliminarEstudiante(<?php echo $estudiante['id_estudiante']; ?>, '<?php echo htmlspecialchars($estudiante['nombre'] . ' ' . $estudiante['apellido']); ?>')">
                                         <i class="fas fa-trash"></i>
                                     </button>
                                 </td>
@@ -343,9 +388,27 @@ $estadisticas = $stmt->fetch();
                         </div>
                         
                         <div class="mb-3">
-                            <label for="nota" class="form-label">Nota (0-100)</label>
-                            <input type="number" class="form-control" id="nota" name="nota" 
-                                   min="0" max="100" step="0.1" required>
+                            <label for="email" class="form-label">Email</label>
+                            <input type="email" class="form-control" id="email" name="email" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="codigo" class="form-label">Código de Estudiante</label>
+                            <input type="text" class="form-control" id="codigo" name="codigo" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="fecha_nacimiento" class="form-label">Fecha de Nacimiento</label>
+                            <input type="date" class="form-control" id="fecha_nacimiento" name="fecha_nacimiento">
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="genero" class="form-label">Género</label>
+                            <select class="form-control" id="genero" name="genero">
+                                <option value="">Seleccione</option>
+                                <option value="M">Masculino</option>
+                                <option value="F">Femenino</option>
+                            </select>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -386,10 +449,13 @@ $estadisticas = $stmt->fetch();
         function editarEstudiante(estudiante) {
             document.getElementById('modalTitulo').textContent = 'Editar Estudiante';
             document.getElementById('accion').value = 'editar';
-            document.getElementById('estudianteId').value = estudiante.id;
-            document.getElementById('nombres').value = estudiante.nombres;
-            document.getElementById('apellidos').value = estudiante.apellidos;
-            document.getElementById('nota').value = estudiante.nota;
+            document.getElementById('estudianteId').value = estudiante.id_estudiante;
+            document.getElementById('nombres').value = estudiante.nombre;
+            document.getElementById('apellidos').value = estudiante.apellido;
+            document.getElementById('email').value = estudiante.email;
+            document.getElementById('codigo').value = estudiante.codigo;
+            document.getElementById('fecha_nacimiento').value = estudiante.fecha_nacimiento;
+            document.getElementById('genero').value = estudiante.genero;
             document.getElementById('btnGuardar').textContent = 'Actualizar';
             
             new bootstrap.Modal(document.getElementById('modalEstudiante')).show();

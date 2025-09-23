@@ -10,7 +10,7 @@ header("Expires: 0");
 
 // Función para verificar si el usuario está logueado
 function isLoggedIn() {
-    return isset($_SESSION['user_id']) && isset($_SESSION['username']) && isset($_SESSION['tipo_usuario']);
+    return isset($_SESSION['user_id']) && isset($_SESSION['email']) && isset($_SESSION['tipo_usuario']);
 }
 
 // Función para verificar si el usuario es docente
@@ -20,7 +20,7 @@ function isDocente() {
 
 // Función para verificar si el usuario es administrador
 function isAdministrador() {
-    return isLoggedIn() && $_SESSION['tipo_usuario'] === 'administrador';
+    return isLoggedIn() && $_SESSION['tipo_usuario'] === 'admin';
 }
 
 // Función para verificar si el usuario es padre

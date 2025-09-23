@@ -24,9 +24,9 @@ if ($_POST) {
             if ($username && $password && $nombres && $apellidos) {
                 try {
                     $hash = password_hash($password, PASSWORD_BCRYPT);
-                    $query = "INSERT INTO usuarios (username, password, tipo_usuario, nombres, apellidos, email) VALUES (?, ?, 'padre', ?, ?, ?)";
+                    $query = "INSERT INTO usuarios (nombre, apellido, email, password, rol) VALUES (?, ?, ?, ?, 'padre')";
                     $stmt = $db->prepare($query);
-                    $stmt->execute([$username, $hash, $nombres, $apellidos, $email]);
+                    $stmt->execute([$nombres, $apellidos, $email, $hash]);
                     $mensaje = 'Padre de familia creado correctamente';
                     $tipoMensaje = 'success';
                 } catch (PDOException $e) {
@@ -44,7 +44,7 @@ if ($_POST) {
             $estudiante_id = intval($_POST['estudiante_id'] ?? 0);
             if ($padre_id > 0 && $estudiante_id > 0) {
                 try {
-                    $query = "INSERT INTO padre_estudiante (padre_id, estudiante_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE activo = 1";
+                    $query = "INSERT INTO relacion_padre_estudiante (id_padre, id_estudiante) VALUES (?, ?)";
                     $stmt = $db->prepare($query);
                     $stmt->execute([$padre_id, $estudiante_id]);
                     $mensaje = 'Asociación creada/activada correctamente';
@@ -63,7 +63,7 @@ if ($_POST) {
             $padre_id = intval($_POST['padre_id'] ?? 0);
             $estudiante_id = intval($_POST['estudiante_id'] ?? 0);
             if ($padre_id > 0 && $estudiante_id > 0) {
-                $query = "UPDATE padre_estudiante SET activo = 0 WHERE padre_id = ? AND estudiante_id = ?";
+                $query = "DELETE FROM relacion_padre_estudiante WHERE id_padre = ? AND id_estudiante = ?";
                 $stmt = $db->prepare($query);
                 if ($stmt->execute([$padre_id, $estudiante_id])) {
                     $mensaje = 'Asociación desactivada';
@@ -84,19 +84,23 @@ if ($_POST) {
 $buscar = trim($_GET['buscar'] ?? '');
 
 // Obtener lista de padres
-$queryPadres = "SELECT id, username, nombres, apellidos, email, activo, fecha_creacion
-                FROM usuarios 
-                WHERE tipo_usuario = 'padre' AND (
-                    username LIKE ? OR nombres LIKE ? OR apellidos LIKE ? OR email LIKE ?
+$queryPadres = "SELECT u.id_usuario, u.nombre, u.apellido, u.email, u.creado_en, p.id_padre
+                FROM usuarios u 
+                JOIN padres p ON u.id_usuario = p.id_usuario
+                WHERE u.rol = 'padre' AND (
+                    u.nombre LIKE ? OR u.apellido LIKE ? OR u.email LIKE ?
                 )
-                ORDER BY apellidos, nombres";
+                ORDER BY u.apellido, u.nombre";
 $stmt = $db->prepare($queryPadres);
 $like = "%$buscar%";
-$stmt->execute([$like, $like, $like, $like]);
+$stmt->execute([$like, $like, $like]);
 $padres = $stmt->fetchAll();
 
 // Obtener estudiantes activos
-$stmt = $db->prepare("SELECT id, nombres, apellidos FROM estudiantes WHERE activo = 1 ORDER BY apellidos, nombres");
+$stmt = $db->prepare("SELECT e.id_estudiante, u.nombre, u.apellido 
+                     FROM estudiantes e 
+                     JOIN usuarios u ON e.id_usuario = u.id_usuario 
+                     ORDER BY u.apellido, u.nombre");
 $stmt->execute();
 $estudiantes = $stmt->fetchAll();
 
@@ -105,15 +109,16 @@ $asociaciones = [];
 if (!empty($padres)) {
     $padreIds = array_column($padres, 'id');
     $in  = str_repeat('?,', count($padreIds) - 1) . '?';
-    $sql = "SELECT pe.padre_id, e.id as estudiante_id, e.nombres, e.apellidos, pe.activo
-            FROM padre_estudiante pe
-            JOIN estudiantes e ON pe.estudiante_id = e.id
-            WHERE pe.padre_id IN ($in)
-            ORDER BY e.apellidos, e.nombres";
+    $sql = "SELECT rpe.id_padre, e.id_estudiante, u.nombre, u.apellido
+            FROM relacion_padre_estudiante rpe
+            JOIN estudiantes e ON rpe.id_estudiante = e.id_estudiante
+            JOIN usuarios u ON e.id_usuario = u.id_usuario
+            WHERE rpe.id_padre IN ($in)
+            ORDER BY u.apellido, u.nombre";
     $stmt = $db->prepare($sql);
     $stmt->execute($padreIds);
     foreach ($stmt->fetchAll() as $row) {
-        $asociaciones[$row['padre_id']][] = $row;
+        $asociaciones[$row['id_padre']][] = $row;
     }
 }
 ?>
@@ -185,7 +190,7 @@ if (!empty($padres)) {
                     <div class="card-body">
                         <h5 class="card-title"><i class="fas fa-filter me-2"></i>Filtrar Padres</h5>
                         <form class="d-flex" method="GET">
-                            <input type="text" class="form-control me-2" name="buscar" placeholder="Buscar por usuario, nombre, apellido o email" value="<?php echo htmlspecialchars($buscar); ?>">
+                            <input type="text" class="form-control me-2" name="buscar" placeholder="Buscar por nombre, apellido o email" value="<?php echo htmlspecialchars($buscar); ?>">
                             <button class="btn btn-primary" type="submit"><i class="fas fa-search me-1"></i>Buscar</button>
                         </form>
                     </div>
@@ -211,10 +216,8 @@ if (!empty($padres)) {
                         <thead class="table-primary">
                             <tr>
                                 <th>ID</th>
-                                <th>Usuario</th>
                                 <th>Nombre</th>
                                 <th>Email</th>
-                                <th>Estado</th>
                                 <th>Estudiantes Asociados</th>
                                 <th>Asociar</th>
                             </tr>
@@ -222,25 +225,19 @@ if (!empty($padres)) {
                         <tbody>
                             <?php if (empty($padres)): ?>
                             <tr>
-                                <td colspan="7" class="text-center py-4"><i class="fas fa-inbox fa-3x text-muted mb-3"></i><p class="text-muted mb-0">No hay padres registrados</p></td>
+                                <td colspan="5" class="text-center py-4"><i class="fas fa-inbox fa-3x text-muted mb-3"></i><p class="text-muted mb-0">No hay padres registrados</p></td>
                             </tr>
                             <?php else: ?>
                             <?php foreach ($padres as $padre): ?>
                             <tr>
-                                <td><?php echo $padre['id']; ?></td>
-                                <td><?php echo htmlspecialchars($padre['username']); ?></td>
-                                <td><?php echo htmlspecialchars($padre['nombres'] . ' ' . $padre['apellidos']); ?></td>
+                                <td><?php echo $padre['id_padre']; ?></td>
+                                <td><?php echo htmlspecialchars($padre['nombre'] . ' ' . $padre['apellido']); ?></td>
                                 <td><?php echo htmlspecialchars($padre['email']); ?></td>
                                 <td>
-                                    <span class="badge bg-<?php echo $padre['activo'] ? 'success' : 'secondary'; ?>">
-                                        <?php echo $padre['activo'] ? 'Activo' : 'Inactivo'; ?>
-                                    </span>
-                                </td>
-                                <td>
-                                    <?php if (!empty($asociaciones[$padre['id']])): ?>
-                                        <?php foreach ($asociaciones[$padre['id']] as $rel): ?>
-                                            <span class="badge bg-<?php echo $rel['activo'] ? 'info' : 'secondary'; ?> mb-1">
-                                                <?php echo htmlspecialchars($rel['nombres'] . ' ' . $rel['apellidos']); ?>
+                                    <?php if (!empty($asociaciones[$padre['id_padre']])): ?>
+                                        <?php foreach ($asociaciones[$padre['id_padre']] as $rel): ?>
+                                            <span class="badge bg-info mb-1">
+                                                <?php echo htmlspecialchars($rel['nombre'] . ' ' . $rel['apellido']); ?>
                                             </span>
                                         <?php endforeach; ?>
                                     <?php else: ?>
@@ -250,23 +247,23 @@ if (!empty($padres)) {
                                 <td>
                                     <form class="d-flex" method="POST">
                                         <input type="hidden" name="accion" value="asociar">
-                                        <input type="hidden" name="padre_id" value="<?php echo $padre['id']; ?>">
+                                        <input type="hidden" name="padre_id" value="<?php echo $padre['id_padre']; ?>">
                                         <select class="form-select me-2" name="estudiante_id" required>
                                             <option value="">Seleccione estudiante</option>
                                             <?php foreach ($estudiantes as $est): ?>
-                                            <option value="<?php echo $est['id']; ?>"><?php echo htmlspecialchars($est['nombres'] . ' ' . $est['apellidos']); ?></option>
+                                            <option value="<?php echo $est['id_estudiante']; ?>"><?php echo htmlspecialchars($est['nombre'] . ' ' . $est['apellido']); ?></option>
                                             <?php endforeach; ?>
                                         </select>
                                         <button class="btn btn-primary btn-action me-2" type="submit"><i class="fas fa-link"></i></button>
                                     </form>
-                                    <?php if (!empty($asociaciones[$padre['id']])): ?>
+                                    <?php if (!empty($asociaciones[$padre['id_padre']])): ?>
                                     <form class="d-inline" method="POST">
                                         <input type="hidden" name="accion" value="desasociar">
-                                        <input type="hidden" name="padre_id" value="<?php echo $padre['id']; ?>">
+                                        <input type="hidden" name="padre_id" value="<?php echo $padre['id_padre']; ?>">
                                         <select class="form-select d-inline-block w-auto me-2" name="estudiante_id" required>
                                             <option value="">Quitar estudiante</option>
-                                            <?php foreach ($asociaciones[$padre['id']] as $rel): ?>
-                                            <option value="<?php echo $rel['estudiante_id']; ?>"><?php echo htmlspecialchars($rel['nombres'] . ' ' . $rel['apellidos']); ?></option>
+                                            <?php foreach ($asociaciones[$padre['id_padre']] as $rel): ?>
+                                            <option value="<?php echo $rel['id_estudiante']; ?>"><?php echo htmlspecialchars($rel['nombre'] . ' ' . $rel['apellido']); ?></option>
                                             <?php endforeach; ?>
                                         </select>
                                         <button class="btn btn-outline-danger btn-action" type="submit"><i class="fas fa-unlink"></i></button>
@@ -295,14 +292,6 @@ if (!empty($padres)) {
                     <div class="modal-body">
                         <input type="hidden" name="accion" value="crear_padre">
                         <div class="mb-3">
-                            <label class="form-label">Usuario</label>
-                            <input type="text" class="form-control" name="username" required>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Contraseña</label>
-                            <input type="password" class="form-control" name="password" required>
-                        </div>
-                        <div class="mb-3">
                             <label class="form-label">Nombres</label>
                             <input type="text" class="form-control" name="nombres" required>
                         </div>
@@ -312,7 +301,11 @@ if (!empty($padres)) {
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Email</label>
-                            <input type="email" class="form-control" name="email">
+                            <input type="email" class="form-control" name="email" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Contraseña</label>
+                            <input type="password" class="form-control" name="password" required>
                         </div>
                     </div>
                     <div class="modal-footer">

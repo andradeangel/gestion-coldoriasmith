@@ -13,11 +13,12 @@ $database = new Database();
 $db = $database->getConnection();
 
 // Obtener los estudiantes asociados al padre
-$query = "SELECT e.*, pe.fecha_creacion as fecha_relacion
+$query = "SELECT e.*, u.nombre, u.apellido, rpe.creado_en as fecha_relacion
           FROM estudiantes e 
-          JOIN padre_estudiante pe ON e.id = pe.estudiante_id 
-          WHERE pe.padre_id = ? AND e.activo = 1 AND pe.activo = 1
-          ORDER BY e.apellidos, e.nombres";
+          JOIN usuarios u ON e.id_usuario = u.id_usuario
+          JOIN relacion_padre_estudiante rpe ON e.id_estudiante = rpe.id_estudiante 
+          WHERE rpe.id_padre = ? 
+          ORDER BY u.apellido, u.nombre";
 $stmt = $db->prepare($query);
 $stmt->execute([$_SESSION['user_id']]);
 $estudiantes = $stmt->fetchAll();
@@ -31,27 +32,32 @@ if ($_GET['estudiante_id']) {
     $estudiante_id = intval($_GET['estudiante_id']);
     
     // Verificar que el estudiante pertenece al padre
-    $query = "SELECT e.* FROM estudiantes e 
-              JOIN padre_estudiante pe ON e.id = pe.estudiante_id 
-              WHERE e.id = ? AND pe.padre_id = ? AND e.activo = 1 AND pe.activo = 1";
+    $query = "SELECT e.*, u.nombre, u.apellido FROM estudiantes e 
+              JOIN usuarios u ON e.id_usuario = u.id_usuario
+              JOIN relacion_padre_estudiante rpe ON e.id_estudiante = rpe.id_estudiante 
+              WHERE e.id_estudiante = ? AND rpe.id_padre = ?";
     $stmt = $db->prepare($query);
     $stmt->execute([$estudiante_id, $_SESSION['user_id']]);
     $estudiante_seleccionado = $stmt->fetch();
     
     if ($estudiante_seleccionado) {
         // Obtener notas del estudiante
-        $query = "SELECT nota, fecha_creacion, fecha_actualizacion 
-                  FROM estudiantes 
-                  WHERE id = ?";
+        $query = "SELECT AVG(c.nota) as promedio_nota, MAX(c.fecha_registro) as ultima_nota
+                  FROM calificaciones c
+                  JOIN inscripciones i ON c.id_inscripcion = i.id_inscripcion
+                  WHERE i.id_estudiante = ?";
         $stmt = $db->prepare($query);
         $stmt->execute([$estudiante_id]);
         $notas_estudiante = $stmt->fetch();
         
         // Obtener asistencias del estudiante (últimos 30 días)
-        $query = "SELECT a.*, u.nombres as docente_nombres, u.apellidos as docente_apellidos
+        $query = "SELECT a.*, u.nombre as docente_nombre, u.apellido as docente_apellido
                   FROM asistencias a 
-                  JOIN usuarios u ON a.docente_id = u.id
-                  WHERE a.estudiante_id = ? 
+                  JOIN inscripciones i ON a.id_inscripcion = i.id_inscripcion
+                  JOIN curso_materia cm ON a.id_curso_materia = cm.id_curso_materia
+                  JOIN docentes d ON cm.id_docente = d.id_docente
+                  JOIN usuarios u ON d.id_usuario = u.id_usuario
+                  WHERE i.id_estudiante = ? 
                   AND a.fecha >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
                   ORDER BY a.fecha DESC";
         $stmt = $db->prepare($query);
@@ -61,12 +67,12 @@ if ($_GET['estudiante_id']) {
         // Obtener estadísticas de asistencia
         $query = "SELECT 
             COUNT(*) as total_dias,
-            SUM(CASE WHEN estado = 'presente' THEN 1 ELSE 0 END) as presentes,
-            SUM(CASE WHEN estado = 'tardanza' THEN 1 ELSE 0 END) as tardanzas,
-            SUM(CASE WHEN estado = 'ausente' THEN 1 ELSE 0 END) as ausentes,
-            SUM(CASE WHEN estado = 'justificado' THEN 1 ELSE 0 END) as justificados
-            FROM asistencias 
-            WHERE estudiante_id = ? AND fecha >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
+            SUM(CASE WHEN a.estado = 'Presente' THEN 1 ELSE 0 END) as presentes,
+            SUM(CASE WHEN a.estado = 'Retraso' THEN 1 ELSE 0 END) as tardanzas,
+            SUM(CASE WHEN a.estado = 'Ausente' THEN 1 ELSE 0 END) as ausentes
+            FROM asistencias a
+            JOIN inscripciones i ON a.id_inscripcion = i.id_inscripcion
+            WHERE i.id_estudiante = ? AND a.fecha >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
         $stmt = $db->prepare($query);
         $stmt->execute([$estudiante_id]);
         $estadisticas_estudiante = $stmt->fetch();
@@ -195,11 +201,11 @@ if ($_GET['estudiante_id']) {
                         <div class="row">
                             <?php foreach ($estudiantes as $estudiante): ?>
                             <div class="col-md-4 mb-3">
-                                <div class="card student-card <?php echo ($estudiante_seleccionado && $estudiante_seleccionado['id'] == $estudiante['id']) ? 'selected' : ''; ?>" 
-                                     onclick="seleccionarEstudiante(<?php echo $estudiante['id']; ?>)">
+                                <div class="card student-card <?php echo ($estudiante_seleccionado && $estudiante_seleccionado['id_estudiante'] == $estudiante['id_estudiante']) ? 'selected' : ''; ?>" 
+                                     onclick="seleccionarEstudiante(<?php echo $estudiante['id_estudiante']; ?>)">
                                     <div class="card-body text-center">
                                         <i class="fas fa-user-graduate fa-3x text-primary mb-3"></i>
-                                        <h6 class="card-title"><?php echo htmlspecialchars($estudiante['nombres'] . ' ' . $estudiante['apellidos']); ?></h6>
+                                        <h6 class="card-title"><?php echo htmlspecialchars($estudiante['nombre'] . ' ' . $estudiante['apellido']); ?></h6>
                                         <p class="card-text text-muted">
                                             <small>Asociado desde: <?php echo date('d/m/Y', strtotime($estudiante['fecha_relacion'])); ?></small>
                                         </p>
@@ -225,7 +231,7 @@ if ($_GET['estudiante_id']) {
                                 <i class="fas fa-user-graduate fa-4x"></i>
                             </div>
                             <div class="col-md-10">
-                                <h3 class="mb-1"><?php echo htmlspecialchars($estudiante_seleccionado['nombres'] . ' ' . $estudiante_seleccionado['apellidos']); ?></h3>
+                                <h3 class="mb-1"><?php echo htmlspecialchars($estudiante_seleccionado['nombre'] . ' ' . $estudiante_seleccionado['apellido']); ?></h3>
                                 <p class="mb-0">Información académica y de asistencia</p>
                             </div>
                         </div>
@@ -240,7 +246,7 @@ if ($_GET['estudiante_id']) {
                 <div class="card stats-card bg-success text-white">
                     <div class="card-body text-center">
                         <i class="fas fa-chart-line fa-2x mb-2"></i>
-                        <h4><?php echo $notas_estudiante['nota']; ?></h4>
+                        <h4><?php echo $notas_estudiante['promedio_nota'] ? number_format($notas_estudiante['promedio_nota'], 1) : 'N/A'; ?></h4>
                         <p class="mb-0">Nota Actual</p>
                     </div>
                 </div>
@@ -287,19 +293,19 @@ if ($_GET['estudiante_id']) {
                         <div class="row">
                             <div class="col-6">
                                 <p><strong>Nota Actual:</strong></p>
-                                <h3 class="text-<?php echo $notas_estudiante['nota'] >= 80 ? 'success' : ($notas_estudiante['nota'] >= 60 ? 'warning' : 'danger'); ?>">
-                                    <?php echo $notas_estudiante['nota']; ?>
+                                <h3 class="text-<?php echo $notas_estudiante['promedio_nota'] >= 80 ? 'success' : ($notas_estudiante['promedio_nota'] >= 60 ? 'warning' : 'danger'); ?>">
+                                    <?php echo $notas_estudiante['promedio_nota'] ? number_format($notas_estudiante['promedio_nota'], 1) : 'N/A'; ?>
                                 </h3>
                             </div>
                             <div class="col-6">
                                 <p><strong>Estado:</strong></p>
-                                <span class="badge bg-<?php echo $notas_estudiante['nota'] >= 80 ? 'success' : ($notas_estudiante['nota'] >= 60 ? 'warning' : 'danger'); ?> fs-6">
-                                    <?php echo $notas_estudiante['nota'] >= 80 ? 'Excelente' : ($notas_estudiante['nota'] >= 60 ? 'Aprobado' : 'Reprobado'); ?>
+                                <span class="badge bg-<?php echo $notas_estudiante['promedio_nota'] >= 80 ? 'success' : ($notas_estudiante['promedio_nota'] >= 60 ? 'warning' : 'danger'); ?> fs-6">
+                                    <?php echo $notas_estudiante['promedio_nota'] >= 80 ? 'Excelente' : ($notas_estudiante['promedio_nota'] >= 60 ? 'Aprobado' : 'Reprobado'); ?>
                                 </span>
                             </div>
                         </div>
                         <hr>
-                        <p><strong>Última actualización:</strong> <?php echo date('d/m/Y H:i', strtotime($notas_estudiante['fecha_actualizacion'])); ?></p>
+                        <p><strong>Última actualización:</strong> <?php echo $notas_estudiante['ultima_nota'] ? date('d/m/Y H:i', strtotime($notas_estudiante['ultima_nota'])) : 'N/A'; ?></p>
                     </div>
                 </div>
             </div>
@@ -380,7 +386,7 @@ if ($_GET['estudiante_id']) {
                                             </span>
                                         </td>
                                         <td><?php echo htmlspecialchars($asistencia['observaciones']); ?></td>
-                                        <td><?php echo htmlspecialchars($asistencia['docente_nombres'] . ' ' . $asistencia['docente_apellidos']); ?></td>
+                                        <td><?php echo htmlspecialchars($asistencia['docente_nombre'] . ' ' . $asistencia['docente_apellido']); ?></td>
                                     </tr>
                                     <?php endforeach; ?>
                                     <?php endif; ?>
