@@ -26,7 +26,7 @@ if ($_POST) {
         $db = $database->getConnection();
         
         if ($db) {
-            $query = "SELECT id_usuario, nombre, apellido, password, rol 
+            $query = "SELECT id_usuario, nombre, apellido, email, password, rol 
                       FROM usuarios 
                       WHERE email = ? AND rol = ?";
             $stmt = $db->prepare($query);
@@ -36,7 +36,7 @@ if ($_POST) {
                 $user = $stmt->fetch();
                 
                 // Verificar contraseña
-                if (password_verify($password, $user['password']) || $password === 'password') {
+                if (password_verify($password, $user['password'])) {
                     $_SESSION['user_id'] = $user['id_usuario'];
                     $_SESSION['email'] = $user['email'];
                     $_SESSION['tipo_usuario'] = $user['rol'];
@@ -164,7 +164,7 @@ if ($_POST) {
                                 </label>
                                 <select class="form-control" id="role" name="role" required>
                                     <option value="">Seleccione un rol</option>
-                                    <option value="administrador">Administrador</option>
+                                    <option value="admin">Administrador</option>
                                     <option value="docente">Docente</option>
                                     <option value="padre">Padre</option>
                                 </select>

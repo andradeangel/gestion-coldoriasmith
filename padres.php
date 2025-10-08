@@ -15,21 +15,32 @@ if ($_POST) {
 
     switch ($accion) {
         case 'crear_padre':
-            $username = trim($_POST['username'] ?? '');
             $password = trim($_POST['password'] ?? '');
             $nombres = trim($_POST['nombres'] ?? '');
             $apellidos = trim($_POST['apellidos'] ?? '');
             $email = trim($_POST['email'] ?? '');
 
-            if ($username && $password && $nombres && $apellidos) {
+            if ($password && $nombres && $apellidos) {
                 try {
+                    $db->beginTransaction();
+                    
+                    // Crear usuario
                     $hash = password_hash($password, PASSWORD_BCRYPT);
                     $query = "INSERT INTO usuarios (nombre, apellido, email, password, rol) VALUES (?, ?, ?, ?, 'padre')";
                     $stmt = $db->prepare($query);
                     $stmt->execute([$nombres, $apellidos, $email, $hash]);
+                    $id_usuario = $db->lastInsertId();
+                    
+                    // Crear registro en tabla padres
+                    $query = "INSERT INTO padres (id_usuario) VALUES (?)";
+                    $stmt = $db->prepare($query);
+                    $stmt->execute([$id_usuario]);
+                    
+                    $db->commit();
                     $mensaje = 'Padre de familia creado correctamente';
                     $tipoMensaje = 'success';
                 } catch (PDOException $e) {
+                    $db->rollBack();
                     $mensaje = 'Error al crear padre: ' . ($e->errorInfo[1] == 1062 ? 'usuario ya existente' : 'verifique los datos');
                     $tipoMensaje = 'danger';
                 }
@@ -107,7 +118,7 @@ $estudiantes = $stmt->fetchAll();
 // Mapa de asociaciones por padre
 $asociaciones = [];
 if (!empty($padres)) {
-    $padreIds = array_column($padres, 'id');
+    $padreIds = array_column($padres, 'id_padre');
     $in  = str_repeat('?,', count($padreIds) - 1) . '?';
     $sql = "SELECT rpe.id_padre, e.id_estudiante, u.nombre, u.apellido
             FROM relacion_padre_estudiante rpe

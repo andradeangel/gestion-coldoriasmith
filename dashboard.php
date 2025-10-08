@@ -2,6 +2,9 @@
 require_once 'config/database.php';
 require_once 'includes/session.php';
 
+// Establecer zona horaria a La Paz
+date_default_timezone_set('America/La_Paz');
+
 // Verificar que el usuario esté logueado
 requireLogin();
 
@@ -108,7 +111,7 @@ $infoUsuario = $mensajesBienvenida[$tipoUsuario];
                     <?php if (isDocente()): ?>
                     <li class="nav-item">
                         <a class="nav-link" href="notas.php">
-                            <i class="fas fa-clipboard-list me-1"></i>Notas
+                            <i class="fas fa-clipboard-list me-1"></i>Estudiantes
                         </a>
                     </li>
                     <li class="nav-item">
@@ -130,6 +133,11 @@ $infoUsuario = $mensajesBienvenida[$tipoUsuario];
                     <li class="nav-item">
                         <a class="nav-link" href="padres.php">
                             <i class="fas fa-user-friends me-1"></i>Padres
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="usuarios.php">
+                            <i class="fas fa-users me-1"></i>Usuarios
                         </a>
                     </li>
                     <?php endif; ?>
@@ -264,33 +272,33 @@ $infoUsuario = $mensajesBienvenida[$tipoUsuario];
             <div class="col-md-4 mb-3">
                 <div class="card stats-card">
                     <div class="card-body text-center">
+                        <div class="icon-circle bg-primary text-white mx-auto mb-3">
+                            <i class="fas fa-user-friends"></i>
+                        </div>
+                        <h5 class="card-title">Padres</h5>
+                        <p class="card-text">Gestionar información de padres</p>
+                        <a href="padres.php" class="btn btn-primary">
+                            <i class="fas fa-arrow-right me-1"></i>Ir a Padres
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4 mb-3">
+                <div class="card stats-card">
+                    <div class="card-body text-center">
                         <div class="icon-circle bg-success text-white mx-auto mb-3">
                             <i class="fas fa-users"></i>
                         </div>
                         <h5 class="card-title">Gestión de Usuarios</h5>
                         <p class="card-text">Administrar usuarios del sistema</p>
-                        <button class="btn btn-success" disabled>
-                            <i class="fas fa-arrow-right me-1"></i>Próximamente
-                        </button>
+                        <a href="usuarios.php" class="btn btn-success">
+                            <i class="fas fa-arrow-right me-1"></i>Ir a Usuarios
+                        </a>
                     </div>
                 </div>
             </div>
-            
-            <div class="col-md-4 mb-3">
-                <div class="card stats-card">
-                    <div class="card-body text-center">
-                        <div class="icon-circle bg-info text-white mx-auto mb-3">
-                            <i class="fas fa-chart-line"></i>
-                        </div>
-                        <h5 class="card-title">Reportes Generales</h5>
-                        <p class="card-text">Ver estadísticas del colegio</p>
-                        <button class="btn btn-info" disabled>
-                            <i class="fas fa-arrow-right me-1"></i>Próximamente
-                        </button>
-                    </div>
-                </div>
-            </div>
-            
+
             <div class="col-md-4 mb-3">
                 <div class="card stats-card">
                     <div class="card-body text-center">

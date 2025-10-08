@@ -33,11 +33,20 @@ if ($_POST) {
                 if ($stmt->rowCount() > 0) {
                     // Actualizar asistencia existente
                     $asistencia_existente = $stmt->fetch();
-                    $query = "UPDATE asistencias SET 
-                             estado = ?, modificado_en = CURRENT_TIMESTAMP
-                             WHERE id_asistencia = ?";
+                    $update_fields = ["estado = ?"];
+                    $params = [$estado];
+                    if (!empty($hora_llegada)) {
+                        $update_fields[] = "creado_en = ?";
+                        $params[] = $fecha . ' ' . $hora_llegada . ':00';
+                    }
+                    if (!empty($hora_salida)) {
+                        $update_fields[] = "modificado_en = ?";
+                        $params[] = $fecha . ' ' . $hora_salida . ':00';
+                    }
+                    $query = "UPDATE asistencias SET " . implode(', ', $update_fields) . " WHERE id_asistencia = ?";
+                    $params[] = $asistencia_existente['id_asistencia'];
                     $stmt = $db->prepare($query);
-                    if ($stmt->execute([$estado, $asistencia_existente['id_asistencia']])) {
+                    if ($stmt->execute($params)) {
                         $mensaje = 'Asistencia actualizada exitosamente';
                         $tipoMensaje = 'success';
                     } else {
@@ -52,11 +61,15 @@ if ($_POST) {
                     $inscripcion = $stmt->fetch();
                     
                     if ($inscripcion) {
+                        // Construir datetimes para horas
+                        $creado_en = !empty($hora_llegada) ? $fecha . ' ' . $hora_llegada . ':00' : date('Y-m-d H:i:s');
+                        $modificado_en = !empty($hora_salida) ? $fecha . ' ' . $hora_salida . ':00' : date('Y-m-d H:i:s');
+
                         // Crear nueva asistencia
-                        $query = "INSERT INTO asistencias (id_inscripcion, id_curso_materia, fecha, estado, creado_por) 
-                                 VALUES (?, 1, ?, ?, ?)";
+                        $query = "INSERT INTO asistencias (id_inscripcion, id_curso_materia, fecha, estado, creado_por, creado_en, modificado_en)
+                                 VALUES (?, 1, ?, ?, ?, ?, ?)";
                         $stmt = $db->prepare($query);
-                        if ($stmt->execute([$inscripcion['id_inscripcion'], $fecha, $estado, $_SESSION['user_id']])) {
+                        if ($stmt->execute([$inscripcion['id_inscripcion'], $fecha, $estado, $_SESSION['user_id'], $creado_en, $modificado_en])) {
                             $mensaje = 'Asistencia registrada exitosamente';
                             $tipoMensaje = 'success';
                         } else {
@@ -73,7 +86,41 @@ if ($_POST) {
                 $tipoMensaje = 'warning';
             }
             break;
-            
+
+        case 'editar_asistencia':
+            $id = intval($_POST['id'] ?? 0);
+            $fecha = $_POST['fecha'] ?? '';
+            $hora_llegada = $_POST['hora_llegada'] ?? '';
+            $hora_salida = $_POST['hora_salida'] ?? '';
+            $estado = $_POST['estado'] ?? 'presente';
+
+            if ($id > 0 && !empty($fecha)) {
+                $update_fields = ["estado = ?"];
+                $params = [$estado];
+                if (!empty($hora_llegada)) {
+                    $update_fields[] = "creado_en = ?";
+                    $params[] = $fecha . ' ' . $hora_llegada . ':00';
+                }
+                if (!empty($hora_salida)) {
+                    $update_fields[] = "modificado_en = ?";
+                    $params[] = $fecha . ' ' . $hora_salida . ':00';
+                }
+                $query = "UPDATE asistencias SET " . implode(', ', $update_fields) . " WHERE id_asistencia = ?";
+                $params[] = $id;
+                $stmt = $db->prepare($query);
+                if ($stmt->execute($params)) {
+                    $mensaje = 'Asistencia actualizada exitosamente';
+                    $tipoMensaje = 'success';
+                } else {
+                    $mensaje = 'Error al actualizar la asistencia';
+                    $tipoMensaje = 'danger';
+                }
+            } else {
+                $mensaje = 'Datos inválidos para la actualización';
+                $tipoMensaje = 'warning';
+            }
+            break;
+
         case 'eliminar_asistencia':
             $id = intval($_POST['id'] ?? 0);
             
@@ -106,12 +153,14 @@ $estudiantes = $stmt->fetchAll();
 
 // Obtener asistencias del día actual por defecto
 $fecha_consulta = $_GET['fecha'] ?? date('Y-m-d');
-$query = "SELECT a.*, u.nombre, u.apellido 
-          FROM asistencias a 
+$query = "SELECT a.*, u.nombre, u.apellido, e.id_estudiante as estudiante_id,
+          TIME_FORMAT(a.creado_en, '%H:%i') as hora_llegada,
+          TIME_FORMAT(a.modificado_en, '%H:%i') as hora_salida
+          FROM asistencias a
           JOIN inscripciones i ON a.id_inscripcion = i.id_inscripcion
           JOIN estudiantes e ON i.id_estudiante = e.id_estudiante
           JOIN usuarios u ON e.id_usuario = u.id_usuario
-          WHERE a.fecha = ? 
+          WHERE a.fecha = ?
           ORDER BY u.apellido, u.nombre";
 $stmt = $db->prepare($query);
 $stmt->execute([$fecha_consulta]);
@@ -208,7 +257,7 @@ $estadisticas = $stmt->fetch();
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="notas.php">
-                            <i class="fas fa-clipboard-list me-1"></i>Notas
+                            <i class="fas fa-clipboard-list me-1"></i>Estudiantes
                         </a>
                     </li>
                     <li class="nav-item">
@@ -336,14 +385,13 @@ $estadisticas = $stmt->fetch();
                                 <th>Hora Llegada</th>
                                 <th>Hora Salida</th>
                                 <th>Estado</th>
-                                <th>Observaciones</th>
                                 <th>Acciones</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php if (empty($asistencias)): ?>
                             <tr>
-                                <td colspan="6" class="text-center py-4">
+                                <td colspan="5" class="text-center py-4">
                                     <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
                                     <p class="text-muted">No hay asistencias registradas para esta fecha</p>
                                 </td>
@@ -352,17 +400,16 @@ $estadisticas = $stmt->fetch();
                             <?php foreach ($asistencias as $asistencia): ?>
                             <tr>
                                 <td><?php echo htmlspecialchars($asistencia['nombre'] . ' ' . $asistencia['apellido']); ?></td>
-                                <td>-</td>
-                                <td>-</td>
+                                <td><?php echo $asistencia['hora_llegada'] ?: '-'; ?></td>
+                                <td><?php echo $asistencia['hora_salida'] ?: '-'; ?></td>
                                 <td>
                                     <span class="badge badge-<?php echo $asistencia['estado']; ?>">
                                         <?php echo ucfirst($asistencia['estado']); ?>
                                     </span>
                                 </td>
-                                <td>-</td>
                                 <td>
-                                    <button type="button" class="btn btn-sm btn-primary btn-action me-1" 
-                                            onclick="editarAsistencia(<?php echo htmlspecialchars(json_encode($asistencia)); ?>)">
+                                    <button type="button" class="btn btn-sm btn-primary btn-action me-1"
+                                            onclick="editarAsistencia('<?php echo $asistencia['id_asistencia']; ?>', '<?php echo $asistencia['estudiante_id']; ?>', '<?php echo $asistencia['fecha']; ?>', '<?php echo $asistencia['hora_llegada'] ?: ''; ?>', '<?php echo $asistencia['hora_salida'] ?: ''; ?>', '<?php echo $asistencia['estado']; ?>')">
                                         <i class="fas fa-edit"></i>
                                     </button>
                                     <button type="button" class="btn btn-sm btn-danger btn-action" 
@@ -390,7 +437,7 @@ $estadisticas = $stmt->fetch();
                 </div>
                 <form method="POST" id="formAsistencia">
                     <div class="modal-body">
-                        <input type="hidden" name="accion" value="registrar_asistencia">
+                        <input type="hidden" name="accion" id="accion" value="registrar_asistencia">
                         <input type="hidden" name="id" id="asistenciaId">
                         
                         <div class="mb-3">
@@ -435,10 +482,6 @@ $estadisticas = $stmt->fetch();
                             </select>
                         </div>
                         
-                        <div class="mb-3">
-                            <label for="observaciones" class="form-label">Observaciones</label>
-                            <textarea class="form-control" id="observaciones" name="observaciones" rows="3"></textarea>
-                        </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -475,17 +518,26 @@ $estadisticas = $stmt->fetch();
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script>
-        function editarAsistencia(asistencia) {
+        function editarAsistencia(id, estudiante_id, fecha, hora_llegada, hora_salida, estado) {
+            // Obtener el formulario y sus elementos
+            const form = document.getElementById('formAsistencia');
+            
+            // Establecer los valores
+            form.querySelector('[name="accion"]').value = 'editar_asistencia';
+            form.querySelector('[name="id"]').value = id;
+            form.querySelector('[name="estudiante_id"]').value = estudiante_id;
+            form.querySelector('[name="fecha"]').value = fecha;
+            form.querySelector('[name="hora_llegada"]').value = hora_llegada;
+            form.querySelector('[name="hora_salida"]').value = hora_salida;
+            form.querySelector('[name="estado"]').value = estado;
+            
+            // Actualizar título y botón
             document.getElementById('modalTitulo').textContent = 'Editar Asistencia';
-            document.getElementById('estudiante_id').value = asistencia.estudiante_id;
-            document.getElementById('fecha').value = asistencia.fecha;
-            document.getElementById('hora_llegada').value = asistencia.hora_llegada || '';
-            document.getElementById('hora_salida').value = asistencia.hora_salida || '';
-            document.getElementById('estado').value = asistencia.estado;
-            document.getElementById('observaciones').value = asistencia.observaciones || '';
             document.getElementById('btnGuardar').textContent = 'Actualizar';
             
-            new bootstrap.Modal(document.getElementById('modalAsistencia')).show();
+            // Mostrar el modal
+            const modal = new bootstrap.Modal(document.getElementById('modalAsistencia'));
+            modal.show();
         }
         
         function eliminarAsistencia(id, nombre) {
@@ -499,6 +551,7 @@ $estadisticas = $stmt->fetch();
         document.getElementById('modalAsistencia').addEventListener('hidden.bs.modal', function () {
             document.getElementById('formAsistencia').reset();
             document.getElementById('modalTitulo').textContent = 'Registrar Asistencia';
+            document.getElementById('accion').value = 'registrar_asistencia';
             document.getElementById('btnGuardar').textContent = 'Guardar';
             document.getElementById('fecha').value = '<?php echo $fecha_consulta; ?>';
         });

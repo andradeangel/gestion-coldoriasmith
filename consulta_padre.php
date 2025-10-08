@@ -12,33 +12,45 @@ if (!isPadre()) {
 $database = new Database();
 $db = $database->getConnection();
 
-// Obtener los estudiantes asociados al padre
-$query = "SELECT e.*, u.nombre, u.apellido, rpe.creado_en as fecha_relacion
-          FROM estudiantes e 
-          JOIN usuarios u ON e.id_usuario = u.id_usuario
-          JOIN relacion_padre_estudiante rpe ON e.id_estudiante = rpe.id_estudiante 
-          WHERE rpe.id_padre = ? 
-          ORDER BY u.apellido, u.nombre";
+// Obtener el ID del padre del usuario actual
+$query = "SELECT p.id_padre FROM padres p WHERE p.id_usuario = ?";
 $stmt = $db->prepare($query);
 $stmt->execute([$_SESSION['user_id']]);
-$estudiantes = $stmt->fetchAll();
+$padre_data = $stmt->fetch();
+
+if (!$padre_data) {
+    $estudiantes = [];
+} else {
+    // Obtener los estudiantes asociados al padre
+    $query = "SELECT e.*, u.nombre, u.apellido, rpe.creado_en as fecha_relacion
+              FROM estudiantes e 
+              JOIN usuarios u ON e.id_usuario = u.id_usuario
+              JOIN relacion_padre_estudiante rpe ON e.id_estudiante = rpe.id_estudiante 
+              WHERE rpe.id_padre = ? 
+              ORDER BY u.apellido, u.nombre";
+    $stmt = $db->prepare($query);
+    $stmt->execute([$padre_data['id_padre']]);
+    $estudiantes = $stmt->fetchAll();
+}
 
 $estudiante_seleccionado = null;
 $notas_estudiante = [];
 $asistencias_estudiante = [];
 $estadisticas_estudiante = [];
 
-if ($_GET['estudiante_id']) {
+if (isset($_GET['estudiante_id']) && !empty($_GET['estudiante_id'])) {
     $estudiante_id = intval($_GET['estudiante_id']);
     
     // Verificar que el estudiante pertenece al padre
-    $query = "SELECT e.*, u.nombre, u.apellido FROM estudiantes e 
-              JOIN usuarios u ON e.id_usuario = u.id_usuario
-              JOIN relacion_padre_estudiante rpe ON e.id_estudiante = rpe.id_estudiante 
-              WHERE e.id_estudiante = ? AND rpe.id_padre = ?";
-    $stmt = $db->prepare($query);
-    $stmt->execute([$estudiante_id, $_SESSION['user_id']]);
-    $estudiante_seleccionado = $stmt->fetch();
+    if ($padre_data) {
+        $query = "SELECT e.*, u.nombre, u.apellido FROM estudiantes e 
+                  JOIN usuarios u ON e.id_usuario = u.id_usuario
+                  JOIN relacion_padre_estudiante rpe ON e.id_estudiante = rpe.id_estudiante 
+                  WHERE e.id_estudiante = ? AND rpe.id_padre = ?";
+        $stmt = $db->prepare($query);
+        $stmt->execute([$estudiante_id, $padre_data['id_padre']]);
+        $estudiante_seleccionado = $stmt->fetch();
+    }
     
     if ($estudiante_seleccionado) {
         // Obtener notas del estudiante
@@ -51,13 +63,15 @@ if ($_GET['estudiante_id']) {
         $notas_estudiante = $stmt->fetch();
         
         // Obtener asistencias del estudiante (últimos 30 días)
-        $query = "SELECT a.*, u.nombre as docente_nombre, u.apellido as docente_apellido
-                  FROM asistencias a 
+        $query = "SELECT a.*, u.nombre as docente_nombre, u.apellido as docente_apellido,
+                  TIME_FORMAT(a.creado_en, '%H:%i') as hora_llegada,
+                  TIME_FORMAT(a.modificado_en, '%H:%i') as hora_salida
+                  FROM asistencias a
                   JOIN inscripciones i ON a.id_inscripcion = i.id_inscripcion
                   JOIN curso_materia cm ON a.id_curso_materia = cm.id_curso_materia
                   JOIN docentes d ON cm.id_docente = d.id_docente
                   JOIN usuarios u ON d.id_usuario = u.id_usuario
-                  WHERE i.id_estudiante = ? 
+                  WHERE i.id_estudiante = ?
                   AND a.fecha >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
                   ORDER BY a.fecha DESC";
         $stmt = $db->prepare($query);
@@ -65,11 +79,12 @@ if ($_GET['estudiante_id']) {
         $asistencias_estudiante = $stmt->fetchAll();
         
         // Obtener estadísticas de asistencia
-        $query = "SELECT 
+        $query = "SELECT
             COUNT(*) as total_dias,
-            SUM(CASE WHEN a.estado = 'Presente' THEN 1 ELSE 0 END) as presentes,
-            SUM(CASE WHEN a.estado = 'Retraso' THEN 1 ELSE 0 END) as tardanzas,
-            SUM(CASE WHEN a.estado = 'Ausente' THEN 1 ELSE 0 END) as ausentes
+            SUM(CASE WHEN a.estado = 'presente' THEN 1 ELSE 0 END) as presentes,
+            SUM(CASE WHEN a.estado = 'tardanza' THEN 1 ELSE 0 END) as tardanzas,
+            SUM(CASE WHEN a.estado = 'ausente' THEN 1 ELSE 0 END) as ausentes,
+            SUM(CASE WHEN a.estado = 'justificado' THEN 1 ELSE 0 END) as justificados
             FROM asistencias a
             JOIN inscripciones i ON a.id_inscripcion = i.id_inscripcion
             WHERE i.id_estudiante = ? AND a.fecha >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
@@ -362,7 +377,6 @@ if ($_GET['estudiante_id']) {
                                         <th>Hora Llegada</th>
                                         <th>Hora Salida</th>
                                         <th>Estado</th>
-                                        <th>Observaciones</th>
                                         <th>Docente</th>
                                     </tr>
                                 </thead>
@@ -378,14 +392,13 @@ if ($_GET['estudiante_id']) {
                                     <?php foreach ($asistencias_estudiante as $asistencia): ?>
                                     <tr>
                                         <td><?php echo date('d/m/Y', strtotime($asistencia['fecha'])); ?></td>
-                                        <td><?php echo $asistencia['hora_llegada'] ? date('H:i', strtotime($asistencia['hora_llegada'])) : '-'; ?></td>
-                                        <td><?php echo $asistencia['hora_salida'] ? date('H:i', strtotime($asistencia['hora_salida'])) : '-'; ?></td>
+                                        <td><?php echo $asistencia['hora_llegada'] ?: '-'; ?></td>
+                                        <td><?php echo $asistencia['hora_salida'] ?: '-'; ?></td>
                                         <td>
                                             <span class="badge badge-<?php echo $asistencia['estado']; ?>">
                                                 <?php echo ucfirst($asistencia['estado']); ?>
                                             </span>
                                         </td>
-                                        <td><?php echo htmlspecialchars($asistencia['observaciones']); ?></td>
                                         <td><?php echo htmlspecialchars($asistencia['docente_nombre'] . ' ' . $asistencia['docente_apellido']); ?></td>
                                     </tr>
                                     <?php endforeach; ?>
